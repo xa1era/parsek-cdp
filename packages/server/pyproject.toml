@@ -7,7 +7,7 @@ name = "parsek-cdp-server"
 version = "0.1.0"
 description = "Parsek CDP server — launch, supervise and proxy a browser; server-side feature producers."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 authors = [{ name = "xa1era" }]
 license = "Apache-2.0"
 dependencies = [

@@ -7,7 +7,7 @@ name = "parsek-cdp"
 version = "0.1.0"
 description = "Chrome DevTools Protocol client — generated protocol layer + async runtime (client scope)."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 authors = [{ name = "xa1era" }]
 license = "Apache-2.0"
 dependencies = ["websockets>=12"]

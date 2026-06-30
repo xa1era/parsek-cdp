@@ -30,7 +30,7 @@ What makes that practical:
 The protocol layer is **fully generated** from the official
 [devtools-protocol](https://github.com/ChromeDevTools/devtools-protocol) JSON
 definitions — one typed module per domain. The runtime is hand-written.
-Requires **Python 3.12+** (the API uses PEP 695 generics).
+Requires **Python 3.13+** (the API uses PEP 695 generics with PEP 696 type-parameter defaults).
 
 > Документация на русском: [README.ru.md](README.ru.md).
 

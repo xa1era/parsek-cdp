@@ -33,7 +33,7 @@
 Слой протокола **полностью генерируется** из официальных JSON-описаний
 [devtools-protocol](https://github.com/ChromeDevTools/devtools-protocol) — по
 одному типизированному модулю на домен. Рантайм написан руками. Требуется
-**Python 3.12+** (API использует дженерики PEP 695).
+**Python 3.13+** (API использует дженерики PEP 695 с дефолтами type-параметров PEP 696).
 
 > Documentation in English: [README.md](README.md).
 
