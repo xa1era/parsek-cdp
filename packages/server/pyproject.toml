@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parsek-cdp-server"
+version = "0.1.0"
+description = "Parsek CDP server — launch, supervise and proxy a browser; server-side feature producers."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "xa1era" }]
+license = "Apache-2.0"
+dependencies = [
+  # Reuses the shared layers (cdp/, core/, parsek/) from the client distribution,
+  # including internal modules -- so track the client's patch line (>=0.1.0,<0.2.0).
+  "parsek-cdp~=0.1.0",
+  "aiohttp>=3.9",          # ws + HTTP endpoints (/cdp/{browser}/control, /cdp/{browser}/page/{target}, /browsers)
+  "psutil>=5",             # watchdog over the Chrome process + zombie reaper
+  "prometheus-client>=0.19",  # /metrics exposition
+]
+
+[project.urls]
+Repository = "https://github.com/xa1era/parsek-cdp"
+
+[tool.setuptools.package-data]
+# Ship the PEP 561 marker so type checkers honour the package's annotations.
+parsek_cdp_server = ["py.typed"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["parsek_cdp_server*"]

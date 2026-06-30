@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [client, server]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+      - name: Build
+        run: python -m build packages/${{ matrix.package }} --outdir dist
+      - name: Check metadata
+        run: python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.package }}
+          path: dist/*
+
+  smoke:
+    name: smoke import (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install packages from source
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ./packages/client
+          python -m pip install ./packages/server
+      - name: Import client
+        run: python -c "import parsek_cdp; print('parsek_cdp', parsek_cdp.__all__)"
+      - name: Import server
+        run: python -c "import parsek_cdp_server; print('parsek_cdp_server', parsek_cdp_server.__all__)"

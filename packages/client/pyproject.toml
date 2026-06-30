@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parsek-cdp"
+version = "0.1.0"
+description = "Chrome DevTools Protocol client — generated protocol layer + async runtime (client scope)."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "xa1era" }]
+license = "Apache-2.0"
+dependencies = ["websockets>=12"]
+
+[project.urls]
+Repository = "https://github.com/xa1era/parsek-cdp"
+
+[project.optional-dependencies]
+# `pip install parsek-cdp[server]` pulls in the separate server distribution.
+# The base client never depends on the server; only this extra links them.
+server = ["parsek-cdp-server~=0.1.0"]
+
+[tool.setuptools.package-data]
+# Ship the PEP 561 marker so type checkers honour the package's annotations.
+parsek_cdp = ["py.typed"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["parsek_cdp*"]
