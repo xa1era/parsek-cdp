@@ -174,6 +174,16 @@ class BrowserSupervisor:
         return f"{self.host}/devtools/page/{target_id}"
 
     @property
+    def is_active(self) -> bool:
+        """Whether the browser is up and serving (state ``READY``).
+
+        Metrics report only active browsers, so a starting / crashed / restarting
+        / closed browser contributes no series (and its stale event counters are
+        pruned), preventing leftover data from lingering.
+        """
+        return self.state is BrowserState.READY
+
+    @property
     def pid(self) -> Optional[int]:
         """PID of the supervised browser process (``None`` before launch)."""
         return self.launcher.pid

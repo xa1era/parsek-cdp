@@ -14,8 +14,12 @@ blocks the event loop:
 
 Metrics:
 
+Only *active* browsers (supervisor state ``READY``) are reported; browsers that
+are still starting, crashed, restarting or closed contribute no series, and any
+event counters they left behind are pruned -- so stale data never lingers.
+
 ==================================  =====  ===========================================
-``parsek_browsers``                 gauge  supervised browsers
+``parsek_browsers``                 gauge  active (READY) browsers
 ``parsek_targets``                  gauge  targets, labelled ``browser``, ``type``
 ``parsek_nested_targets``           gauge  targets with a ``parentId``, per ``browser``
 ``parsek_browser_cpu_percent``      gauge  CPU% of the browser tree, per ``browser``
@@ -125,6 +129,11 @@ class ServerMetrics:
         snapshot: Dict[str, _BrowserSnapshot] = {}
         live_targets: Set[Tuple[str, str]] = set()
         for browser_uuid, supervisor in list(self._server.supervisors.items()):
+            # Only active (READY) browsers contribute metrics; skipping the rest
+            # keeps their targets out of ``live_targets`` so their event series
+            # are pruned below instead of lingering.
+            if not supervisor.is_active:
+                continue
             snap = _BrowserSnapshot()
             origin = supervisor.http_origin
             if origin is not None:
@@ -201,8 +210,8 @@ class _Collector:
         m = self._metrics
         snapshot = m._snapshot
 
-        browsers = GaugeMetricFamily("parsek_browsers", "Number of supervised browsers")
-        browsers.add_metric([], float(len(m._server.supervisors)))
+        browsers = GaugeMetricFamily("parsek_browsers", "Number of active (READY) browsers")
+        browsers.add_metric([], float(len(snapshot)))
         yield browsers
 
         targets = GaugeMetricFamily(

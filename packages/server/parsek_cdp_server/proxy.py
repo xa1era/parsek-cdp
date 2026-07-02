@@ -37,6 +37,7 @@ from aiohttp import web
 from parsek_cdp._logging import get_logger
 from parsek_cdp.core.feature import Feature
 from parsek_cdp.core.target import ProtocolError
+from parsek_cdp.parsek import BrowserState
 from parsek_cdp.parsek.events import BrowserStateChanged
 
 from .launcher import LaunchOptions
@@ -316,6 +317,9 @@ class ParsekServer:
             browser_uuid, options=options, idle_timeout=idle_timeout
         )
         supervisor.on_state(self._state_broadcaster(browser_uuid))
+        # Registered after the broadcaster so clients still receive the CLOSED
+        # frame before the registries are dropped.
+        supervisor.on_state(self._forget_on_close(browser_uuid))
         self.supervisors[browser_uuid] = supervisor
         self._browser_features[browser_uuid] = feats
         self._control_clients[browser_uuid] = set()
@@ -496,6 +500,23 @@ class ParsekServer:
                 {c2b, b2c}, return_when=asyncio.FIRST_COMPLETED
             )
             await _close_pending(pending)
+
+    def _forget_on_close(self, browser_uuid: str):
+        """Drop a browser from the registries once it reaches ``CLOSED``.
+
+        This is how a self-initiated shutdown -- notably the supervisor's idle
+        timeout (:meth:`BrowserSupervisor._close_idle`) -- gets its supervisor
+        removed from :attr:`supervisors` (and the sibling registries), without the
+        supervisor needing a back-reference to the server.  Idempotent, so a
+        ``CLOSED`` also driven by :meth:`_graceful_close`/:meth:`stop` is harmless.
+        """
+        def callback(state, reason=None) -> None:
+            if state is BrowserState.CLOSED:
+                self.supervisors.pop(browser_uuid, None)
+                self._browser_features.pop(browser_uuid, None)
+                self._control_clients.pop(browser_uuid, None)
+
+        return callback
 
     def _state_broadcaster(self, browser_uuid: str):
         def callback(state, reason) -> None:
