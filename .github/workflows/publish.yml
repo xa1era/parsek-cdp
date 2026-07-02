@@ -20,6 +20,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Set version from release tag
+        if: github.event_name == 'release'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Publishing parsek-cdp $VERSION"
+          sed -i "s/^version = .*/version = \"$VERSION\"/" packages/client/pyproject.toml
       - run: python -m pip install --upgrade build twine
       - run: python -m build packages/client --outdir dist
       - run: python -m twine check dist/*
@@ -39,6 +45,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Set version from release tag
+        if: github.event_name == 'release'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Publishing parsek-cdp-server $VERSION"
+          sed -i "s/^version = .*/version = \"$VERSION\"/" packages/server/pyproject.toml
+          # Keep the client dependency pinned to the version released together.
+          sed -i "s/parsek-cdp~=[0-9A-Za-z.]*/parsek-cdp~=$VERSION/" packages/server/pyproject.toml
       - run: python -m pip install --upgrade build twine
       - run: python -m build packages/server --outdir dist
       - run: python -m twine check dist/*
