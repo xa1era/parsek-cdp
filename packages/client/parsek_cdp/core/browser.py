@@ -13,7 +13,14 @@ from ..cdp import Target as TargetDomain
 from .browser_context import BrowserContext
 from .pagable import PagableTarget
 from .page import Page
-from .target import CDPConnection, Target, cdp_host, cdp_target_path, ws_origin
+from .target import (
+    CDPConnection,
+    ProtocolError,
+    Target,
+    cdp_host,
+    cdp_target_path,
+    ws_origin,
+)
 
 
 class Browser[T: Page](Target, PagableTarget[T]):
@@ -238,3 +245,25 @@ class Browser[T: Page](Target, PagableTarget[T]):
         if ctx is not None:
             for target_id in list(ctx._pages):
                 self._drop_page(target_id)
+
+    async def close(self) -> None:
+        """Close the browser: quit the process, then tear down the connection.
+
+        :meth:`Target.close` alone only closes the local websocket -- the browser
+        stays alive.  We first ask the browser to quit via ``Browser.close``, then
+        run the base teardown (recv task, websockets, child targets).
+
+        For a server-managed browser the ``Browser.close`` frame is intercepted on
+        the proxy's control channel and turned into a graceful supervisor
+        shutdown (so the exit is not mistaken for a crash and relaunched).
+
+        ``Browser.close`` makes the browser drop the connection as it exits, so
+        the command's reply may never arrive (the socket closes first); a
+        :class:`ConnectionError` here means the browser is already gone, which is
+        exactly what we want, so it is swallowed.
+        """
+        try:
+            await self.cdp.Browser.close()
+        except (ConnectionError, ProtocolError):
+            pass
+        await super().close()

@@ -30,7 +30,7 @@ import itertools
 import json
 import subprocess
 import uuid
-from typing import Callable, Dict, List, Optional, Set, Tuple, Type
+from typing import Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type
 
 import websockets
 from aiohttp import web
@@ -384,11 +384,43 @@ class ParsekServer:
             ),
         )
         try:
-            await self._pipe(ws, supervisor.ws_url)
+            await self._pipe(
+                ws, supervisor.ws_url, on_client_frame=self._on_control_frame(browser_uuid)
+            )
         finally:
             clients.discard(ws)
             supervisor.client_disconnected()
         return ws
+
+    def _on_control_frame(self, browser_uuid: str):
+        """Watch a control channel for the client's ``Browser.close`` request.
+
+        The frame is still forwarded to the browser (it closes itself gracefully);
+        this handler additionally shuts the *supervisor* down so the resulting
+        process exit is recorded as an intentional ``CLOSED`` rather than a crash
+        to be relaunched.
+        """
+        async def handle(data: str) -> None:
+            # Cheap substring gate first -- only bother parsing the frame that
+            # could actually be the close request, not every control message.
+            if "Browser.close" not in data:
+                return
+            try:
+                method = json.loads(data).get("method")
+            except Exception:
+                return
+            if method == "Browser.close":
+                await self._graceful_close(browser_uuid)
+
+        return handle
+
+    async def _graceful_close(self, browser_uuid: str) -> None:
+        """Stop supervising ``browser_uuid`` and terminate it (idempotent)."""
+        supervisor = self.supervisors.pop(browser_uuid, None)
+        self._browser_features.pop(browser_uuid, None)
+        self._control_clients.pop(browser_uuid, None)
+        if supervisor is not None:
+            await supervisor.shutdown()
 
     async def page_ws(self, request: web.Request) -> web.WebSocketResponse:
         """``ws /cdp/{browser}/page/{target}``: pipe to a target + aggregation."""
@@ -424,8 +456,18 @@ class ParsekServer:
 
     # -- helpers ----------------------------------------------------------- #
 
-    async def _pipe(self, client_ws: web.WebSocketResponse, chrome_url: str) -> None:
-        """Relay raw frames both ways between a client socket and Chrome."""
+    async def _pipe(
+        self,
+        client_ws: web.WebSocketResponse,
+        chrome_url: str,
+        on_client_frame: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> None:
+        """Relay raw frames both ways between a client socket and Chrome.
+
+        ``on_client_frame`` (if given) is invoked with each text frame *after* it
+        has been forwarded, letting the caller react to specific commands (e.g.
+        ``Browser.close``) without disturbing the passthrough.
+        """
         async with websockets.connect(
             chrome_url, max_size=None, ping_interval=None
         ) as chrome:
@@ -436,6 +478,8 @@ class ParsekServer:
                         if msg.type is not web.WSMsgType.TEXT:
                             break
                         await chrome.send(msg.data)
+                        if on_client_frame is not None:
+                            await on_client_frame(msg.data)
                 except (websockets.ConnectionClosed, ConnectionError):
                     pass
 

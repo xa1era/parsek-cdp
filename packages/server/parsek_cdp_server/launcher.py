@@ -10,11 +10,11 @@ drives this class.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import random
 import shutil
-import signal
 import tempfile
 import urllib.error
 import urllib.request
@@ -271,21 +271,45 @@ class ChromeLauncher:
         return psutil.pid_exists(self.pid)
 
     async def terminate(self, *, timeout: float = 5.0) -> None:
-        """Terminate the browser process gracefully, then kill if it lingers."""
+        """Terminate the browser process tree gracefully, then kill survivors.
+
+        Chrome frequently re-execs or forks the real browser into a *separate*
+        process (headed mode, wrapper launch scripts, the relauncher), after which
+        the process we spawned has already exited.  Signalling only that direct
+        child would then leave the real browser running as an orphan, so we walk
+        the whole tree rooted at :attr:`pid` (parent + recursive children) and
+        SIGTERM it, escalating to SIGKILL for anything still alive after the grace
+        period.
+        """
+        procs = self._process_tree()
+        for p in procs:
+            with _suppress_lookup():
+                p.terminate()  # SIGTERM
+        # psutil.wait_procs is blocking, so run it off the event loop.
+        _gone, alive = await asyncio.to_thread(psutil.wait_procs, procs, timeout=timeout)
+        for p in alive:
+            with _suppress_lookup():
+                p.kill()  # SIGKILL
+        # Reap the asyncio child so its transport doesn't warn about a lost process.
         proc = self._proc
         if proc is not None and proc.returncode is None:
-            try:
-                proc.send_signal(signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            else:
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout)
-                except asyncio.TimeoutError:
-                    with _suppress_lookup():
-                        proc.kill()
-                    await proc.wait()
+            with contextlib.suppress(ProcessLookupError):
+                await proc.wait()
         self._cleanup_profile()
+
+    def _process_tree(self) -> List[psutil.Process]:
+        """The browser process and all its descendants (empty if already gone)."""
+        if self.pid is None:
+            return []
+        try:
+            parent = psutil.Process(self.pid)
+        except psutil.NoSuchProcess:
+            return []
+        try:
+            children = parent.children(recursive=True)
+        except psutil.NoSuchProcess:
+            children = []
+        return [parent, *children]
 
     def _cleanup_profile(self) -> None:
         if self._owned_user_data_dir is not None:
@@ -294,10 +318,17 @@ class ChromeLauncher:
 
 
 class _suppress_lookup:
-    """Context manager swallowing ``ProcessLookupError`` (process already gone)."""
+    """Context manager swallowing "process already gone" errors.
+
+    Covers both :class:`ProcessLookupError` (from ``asyncio``/``os`` signalling)
+    and :class:`psutil.NoSuchProcess` (from the process-tree walk), which race
+    naturally: a process can exit between being listed and being signalled.
+    """
 
     def __enter__(self) -> "_suppress_lookup":
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        return exc_type is not None and issubclass(exc_type, ProcessLookupError)
+        return exc_type is not None and issubclass(
+            exc_type, (ProcessLookupError, psutil.NoSuchProcess)
+        )
