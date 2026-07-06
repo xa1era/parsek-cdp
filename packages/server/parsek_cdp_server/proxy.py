@@ -35,12 +35,12 @@ from typing import Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type
 import websockets
 from aiohttp import web
 from parsek_cdp._logging import get_logger
+from parsek_cdp.core.browser import LaunchOptions
 from parsek_cdp.core.feature import Feature
 from parsek_cdp.core.target import ProtocolError
 from parsek_cdp.parsek import BrowserState
 from parsek_cdp.parsek.events import BrowserStateChanged
 
-from .launcher import LaunchOptions
 from .metrics import ServerMetrics
 from .reaper import spawn_reaper
 from .supervisor import BrowserSupervisor
@@ -333,17 +333,8 @@ class ParsekServer:
             body = await request.json() if request.can_read_body else {}
         except Exception:
             body = {}
-        allowed = {
-            "executable",
-            "headless",
-            "port",
-            "user_data_dir",
-            "extra_args",
-            "default_args",
-        }
-        kwargs = {k: body[k] for k in allowed if k in body}
-        if kwargs:
-            return LaunchOptions(**kwargs)
+        if body:
+            return LaunchOptions.from_json(body)
         return self.launch_options
 
     async def _idle_timeout(self, request: web.Request) -> Optional[float]:
@@ -389,7 +380,9 @@ class ParsekServer:
         )
         try:
             await self._pipe(
-                ws, supervisor.ws_url, on_client_frame=self._on_control_frame(browser_uuid)
+                ws,
+                supervisor.ws_url,
+                on_client_frame=self._on_control_frame(browser_uuid),
             )
         finally:
             clients.discard(ws)
@@ -404,6 +397,7 @@ class ParsekServer:
         process exit is recorded as an intentional ``CLOSED`` rather than a crash
         to be relaunched.
         """
+
         async def handle(data: str) -> None:
             # Cheap substring gate first -- only bother parsing the frame that
             # could actually be the close request, not every control message.
@@ -440,8 +434,10 @@ class ParsekServer:
         feats = self._browser_features.get(browser_uuid, self.features)
         on_event = None
         if self.metrics is not None:
+
             def on_event(domain: str) -> None:
                 self.metrics.record_event(browser_uuid, target_id, domain)
+
         bridge = PageBridge(
             ws,
             supervisor.target_ws_url(target_id),
@@ -510,6 +506,7 @@ class ParsekServer:
         supervisor needing a back-reference to the server.  Idempotent, so a
         ``CLOSED`` also driven by :meth:`_graceful_close`/:meth:`stop` is harmless.
         """
+
         def callback(state, reason=None) -> None:
             if state is BrowserState.CLOSED:
                 self.supervisors.pop(browser_uuid, None)

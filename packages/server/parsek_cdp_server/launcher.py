@@ -18,11 +18,11 @@ import shutil
 import tempfile
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
 import psutil
+from parsek_cdp.core.browser import LaunchOptions
 
 #: Env var naming *directories* to search for browser binaries,
 #: ``os.pathsep``-separated (like ``PATH``), e.g. ``/opt/browsers/chrome:/opt/browsers/brave``.
@@ -102,27 +102,26 @@ def _is_browser(filename: str) -> bool:
 
 
 def _find_in_dirs(dirs: List[str]) -> List[str]:
-    """Recursively collect browser executables found under ``dirs``."""
+    """Collect browser executables directly under ``dirs`` (non-recursive)."""
     found: List[str] = []
     for directory in dirs:
         directory = directory.strip()
         if not directory or not os.path.isdir(directory):
             continue
-        for root, _subdirs, files in os.walk(directory):
-            for filename in files:
-                if not _is_browser(filename):
-                    continue
-                full = os.path.join(root, filename)
-                if os.path.isfile(full) and os.access(full, os.X_OK):
-                    found.append(full)
+        for filename in os.listdir(directory):
+            if not _is_browser(filename):
+                continue
+            full = os.path.join(directory, filename)
+            if os.path.isfile(full) and os.access(full, os.X_OK):
+                found.append(full)
     return found
 
 
 def _detect_executable() -> str:
     """Pick a Chromium-based binary, or raise if none is available.
 
-    Precedence: a random browser executable found by recursively searching the
-    directories in :data:`CHROMES_PATH_ENV` (defaulting to :data:`_KNOWN_PATHS`),
+    Precedence: a random browser executable found directly in the directories
+    listed in :data:`CHROMES_PATH_ENV` (defaulting to :data:`_KNOWN_PATHS`),
     else the first :data:`_CANDIDATES` name resolvable on ``PATH``.
     """
     raw = os.environ.get(CHROMES_PATH_ENV)
@@ -138,18 +137,6 @@ def _detect_executable() -> str:
         f"no Chrome/Chromium executable found; set {CHROMES_PATH_ENV} "
         "(os.pathsep-separated directories to search) or LaunchOptions.executable"
     )
-
-
-@dataclass
-class LaunchOptions:
-    """How to start the browser."""
-
-    executable: Optional[str] = None  # autodetect if None
-    headless: bool = True
-    port: int = 0
-    user_data_dir: Optional[str] = None
-    extra_args: List[str] = field(default_factory=list)
-    default_args: bool = True
 
 
 class ChromeLauncher:
@@ -173,8 +160,6 @@ class ChromeLauncher:
         #: Temp profile dir we created (and must clean up); None if caller supplied one.
         self._owned_user_data_dir: Optional[str] = None
 
-    # -- argv -------------------------------------------------------------- #
-
     def _resolve_user_data_dir(self) -> str:
         if self.options.user_data_dir is not None:
             return self.options.user_data_dir
@@ -185,7 +170,7 @@ class ChromeLauncher:
     def _build_argv(self, user_data_dir: str) -> List[str]:
         executable = self.options.executable or _detect_executable()
         argv = [executable, f"--remote-debugging-port={self.options.port}"]
-        if self.options.default_args:
+        if self.options.use_default_args:
             argv += [
                 f"--user-data-dir={user_data_dir}",
                 "--no-first-run",
@@ -286,7 +271,9 @@ class ChromeLauncher:
             with _suppress_lookup():
                 p.terminate()  # SIGTERM
         # psutil.wait_procs is blocking, so run it off the event loop.
-        _gone, alive = await asyncio.to_thread(psutil.wait_procs, procs, timeout=timeout)
+        _gone, alive = await asyncio.to_thread(
+            psutil.wait_procs, procs, timeout=timeout
+        )
         for p in alive:
             with _suppress_lookup():
                 p.kill()  # SIGKILL

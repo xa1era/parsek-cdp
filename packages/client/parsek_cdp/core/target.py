@@ -386,13 +386,13 @@ class Target(CDPConnection):
         ``parent_frame_id``; a popup under its ``opener_id``), rooting at this
         target.  Existing :class:`Target` objects are reused -- preserving their
         identity and any open websocket -- and targets gone from the snapshot are
-        dropped.  Returns this target's direct children.
+        dropped and closed.  Returns this target's direct children.
         """
         infos = (await self.cdp.Target.get_targets()).target_infos
-        self._rebuild_tree(infos)
+        await self._rebuild_tree(infos)
         return self.targets
 
-    def _rebuild_tree(self, infos: list[TargetDomain.TargetInfo]) -> None:
+    async def _rebuild_tree(self, infos: list[TargetDomain.TargetInfo]) -> None:
         # ``getTargets`` is browser-wide, so group children by their parent and
         # then walk only the subtree rooted at *this* target -- a page must not
         # adopt unrelated top-level targets (other tabs, extensions, ...).
@@ -419,6 +419,7 @@ class Target(CDPConnection):
         self._targets = {}
 
         root_key = None if self.type_ == "browser" else self.id
+        attached: set[str] = set()
 
         def attach(parent: Target, key: Optional[str], seen: set[str]) -> None:
             for info in children_of.get(key, ()):
@@ -426,6 +427,7 @@ class Target(CDPConnection):
                 if tid in seen:  # guard against cyclic parent links
                     continue
                 seen.add(tid)
+                attached.add(tid)
                 node = known.get(tid) or Target(info, parent)
                 node._target = info
                 node._parent = parent
@@ -433,6 +435,12 @@ class Target(CDPConnection):
                 attach(node, tid, seen)
 
         attach(self, root_key, set())
+
+        # Nodes gone from the fresh snapshot aren't reattached above -- close
+        # them explicitly so their websocket and receive loop don't leak.
+        for tid, node in known.items():
+            if tid not in attached:
+                await node.close()
 
     async def _on_target_created(self, event: TargetDomain.TargetCreated):
         info = event.target_info

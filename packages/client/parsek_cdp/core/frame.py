@@ -73,7 +73,18 @@ class Frame:
         self._dom_generation = 0
         self._head_elem = None
 
+        self._bind_frame_tracking()
         self._bind_dom_tracking()
+
+    def _bind_frame_tracking(self) -> None:
+        self.target.on(Page.FrameAttached, self._on_page_attach_frame)
+        self.target.on(Page.FrameNavigated, self._on_page_navigated_frame)
+        self.target.on(Page.FrameDetached, self._on_page_dettached_frame)
+
+    def _unbind_frame_tracking(self) -> None:
+        self.target.off(Page.FrameAttached, self._on_page_attach_frame)
+        self.target.off(Page.FrameNavigated, self._on_page_navigated_frame)
+        self.target.off(Page.FrameDetached, self._on_page_dettached_frame)
 
     def _bind_dom_tracking(self) -> None:
         """Track every event that invalidates this frame's ``nodeId`` map.
@@ -98,14 +109,15 @@ class Frame:
         self._dom_generation += 1
 
     def dispose(self) -> None:
-        """Unregister this frame's (and its subtree's) DOM-tracking handlers.
+        """Unregister this frame's (and its subtree's) target-level handlers.
 
         Same-origin frames share one target, so the handlers bound in
-        :meth:`_bind_dom_tracking` outlive the frame unless removed explicitly.
-        Call this whenever a frame leaves the tree (see :meth:`detach_frame` /
-        :meth:`refresh_frame`) so recreated frames don't pile up dead handlers on
-        the target.
+        :meth:`_bind_dom_tracking` / :meth:`_bind_frame_tracking` outlive the
+        frame unless removed explicitly.  Call this whenever a frame leaves the
+        tree (see :meth:`detach_frame` / :meth:`refresh_frame`) so recreated
+        frames don't pile up dead handlers on the target.
         """
+        self._unbind_frame_tracking()
         self._unbind_dom_tracking()
         for child in list(self._frames.values()):
             child.dispose()
@@ -335,6 +347,18 @@ class Frame:
         if state is ElementState.VISIBLE:
             return visible, element
         return not visible, element
+
+    async def _on_page_attach_frame(self, event: Page.FrameAttached):
+        if event.parent_frame_id == self.id:
+            await self.refresh_frame()
+
+    def _on_page_navigated_frame(self, event: Page.FrameNavigated):
+        if event.frame.id == self.id:
+            self._frame = event.frame
+
+    def _on_page_dettached_frame(self, event: Page.FrameDetached):
+        if event.frame_id in self._frames:
+            self._frames.pop(event.frame_id, None)
 
     def attach_frame(self, frame: Frame):
         self._frames[frame.id] = frame

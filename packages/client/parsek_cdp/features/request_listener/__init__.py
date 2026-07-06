@@ -126,9 +126,7 @@ class RequestListener(Feature):
                 old._completed.set()
             self._requests.clear()
             keep = data.request_id
-            self._pending = (
-                {keep: self._pending[keep]} if keep in self._pending else {}
-            )
+            self._pending = {keep: self._pending[keep]} if keep in self._pending else {}
             self._resp = {keep: self._resp[keep]} if keep in self._resp else {}
             self._emitted = {keep} if keep in self._emitted else set()
             self._served_from_cache = (

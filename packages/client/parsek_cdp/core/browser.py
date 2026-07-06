@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import urllib.parse
 import urllib.request
-from typing import ClassVar, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Dict, List, Optional
 
 from ..cdp import CDP
 from ..cdp import Target as TargetDomain
@@ -21,6 +23,32 @@ from .target import (
     cdp_target_path,
     ws_origin,
 )
+
+
+@dataclass
+class LaunchOptions:
+    """How to start the browser.
+
+    Plain internal config, not a CDP wire type -- ``to_json``/``from_json`` are
+    hand-rolled here (rather than via :class:`DataType`, whose ``__FIELDS__``
+    machinery is driven by protocol codegen and fills any field absent from the
+    payload with ``None``, clobbering these fields' non-``None`` defaults).
+    """
+
+    executable: Optional[str] = None  # autodetect if None
+    headless: bool = True
+    port: int = 0
+    user_data_dir: Optional[str] = None
+    extra_args: List[str] = field(default_factory=list)
+    use_default_args: bool = True
+
+    def to_json(self) -> Dict[str, Any]:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> "LaunchOptions":
+        allowed = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in allowed})
 
 
 class Browser[T: Page](Target, PagableTarget[T]):
@@ -109,7 +137,7 @@ class Browser[T: Page](Target, PagableTarget[T]):
         *,
         features: Optional[tuple] = None,
         page_class: Optional[type] = None,
-        **launch,
+        launch_options: LaunchOptions = LaunchOptions(),
     ) -> "Browser[T]":
         """Create a browser on a parsek-cdp-server and return it, connected.
 
@@ -133,7 +161,7 @@ class Browser[T: Page](Target, PagableTarget[T]):
         )
         query = "&".join(f"feature={urllib.parse.quote(f.__name__)}" for f in feats)
         url = f"{server.rstrip('/')}/browsers" + (f"?{query}" if query else "")
-        payload = json.dumps(launch).encode()
+        payload = json.dumps(launch_options.to_json()).encode()
         # Run the blocking HTTP POST off the event loop so it never stalls it
         # (notably when client and server share one loop in tests).
         info = await asyncio.to_thread(cls._post_json, url, payload)
