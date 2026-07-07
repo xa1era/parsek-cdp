@@ -166,7 +166,10 @@ class RequestListener(Feature):
         rd.resource_type = e.type_.value if e.type_ else None
         rd.frame_id = e.frame_id
         rd.loader_id = e.loader_id
-        rd.is_navigation = e.type_ == Network.ResourceType.DOCUMENT
+        rd.is_navigation = (
+            e.type_ == Network.ResourceType.DOCUMENT
+            and e.frame_id == self.host.frame_id
+        )
 
     @on(Network.RequestServedFromCache)
     def _on_served_from_cache(self, e: "Network.RequestServedFromCache") -> None:

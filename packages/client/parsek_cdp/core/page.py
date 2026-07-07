@@ -67,6 +67,10 @@ class Page[T: Feature](Target, FeatureHost[T], Frame):
         self.browser = browser
         self.browser._targets[self.id] = self
 
+    @property
+    def frame_id(self):
+        return self._frame.id
+
     async def connect(self) -> "Page[T]":
         """Open the page's own websocket, learn its main frame, start features."""
         await super().connect()
