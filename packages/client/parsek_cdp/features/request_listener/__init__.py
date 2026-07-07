@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Optional, Union
 
 from ...cdp import Network
 from ...cdp.mixins.namespace import attach_namespace
@@ -49,11 +49,11 @@ class RequestListener(Feature):
     def __init__(
         self, host, *, role: str = "client", preserve_log: bool = False
     ) -> None:
-        self._requests: Dict[str, Request] = {}
+        self._requests: dict[str, Request] = {}
         self.preserve_log = preserve_log
-        self._waiters: List[tuple] = []
-        self._pending: Dict[str, RequestData] = {}
-        self._resp: Dict[str, ResponseData] = {}
+        self._waiters: list[tuple] = []
+        self._pending: dict[Network.RequestId, RequestData] = {}
+        self._resp: dict[str, ResponseData] = {}
         self._emitted: set[str] = set()
         #: request ids the browser reported as served from the memory cache
         #: (``requestServedFromCache`` fires before ``responseReceived``).
@@ -61,7 +61,7 @@ class RequestListener(Feature):
         super().__init__(host, role=role)
 
     @property
-    def requests(self) -> List[Request]:
+    def requests(self) -> list[Request]:
         return list(self._requests.values())
 
     def get(self, target: Matcher) -> Optional[Request]:
@@ -167,8 +167,7 @@ class RequestListener(Feature):
         rd.frame_id = e.frame_id
         rd.loader_id = e.loader_id
         rd.is_navigation = (
-            e.type_ == Network.ResourceType.DOCUMENT
-            and e.frame_id == self.host.frame_id
+            e.type_ == Network.ResourceType.DOCUMENT and e.frame_id == self.host.id
         )
 
     @on(Network.RequestServedFromCache)

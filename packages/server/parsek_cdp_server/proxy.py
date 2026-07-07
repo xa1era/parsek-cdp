@@ -76,6 +76,7 @@ class PageBridge:
         client_ws: web.WebSocketResponse,
         chrome_url: str,
         feature_classes: Tuple[Type[Feature], ...],
+        target_id: str,
         *,
         raw_passthrough: bool = False,
         on_event: Optional[Callable[[str], None]] = None,
@@ -90,6 +91,11 @@ class PageBridge:
         self._server_pending: Dict[int, asyncio.Future] = {}
         self._features: List[Feature] = []
         self._suppress: Tuple[str, ...] = ()
+        self._target_id = target_id
+
+    @property
+    def id(self):
+        return self._target_id
 
     async def run(self) -> None:
         async with websockets.connect(
@@ -442,6 +448,7 @@ class ParsekServer:
             ws,
             supervisor.target_ws_url(target_id),
             feats,
+            target_id,
             raw_passthrough=raw,
             on_event=on_event,
         )

@@ -43,7 +43,6 @@ import dataclasses
 import typing
 from enum import Enum
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
     ClassVar,
@@ -57,9 +56,6 @@ from typing import (
 )
 
 from ..cdp.mixins.datatype import DataType, FieldMeta, register
-
-if TYPE_CHECKING:
-    from .page import Page
 
 __all__ = ["Feature", "FeatureHost", "parsek_type", "on", "emit"]
 
@@ -181,7 +177,7 @@ class Feature:
     #: client passthrough.
     domains: tuple = ()
 
-    def __init__(self, host: Page, *, role: str = "client") -> None:
+    def __init__(self, host, *, role: str = "client") -> None:
         self.host = host
         self.role = role
         #: cdp method -> (event class, bound handler, emits class | None)
