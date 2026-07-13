@@ -63,6 +63,13 @@ class BrowserSupervisor:
         self._connections = 0
         #: Loop time the browser went idle (no connections), or ``None``.
         self._idle_since: Optional[float] = None
+        #: Armed by :meth:`expect_exit` when the client sent a command that
+        #: *might* make the browser quit on its own (closing the last target /
+        #: browser context); tells :meth:`_watch` to record the next observed
+        #: exit as a graceful close instead of a crash to relaunch. Cleared the
+        #: moment the browser is next seen alive, so it only covers the poll
+        #: right after such a command.
+        self._expect_exit = False
 
     def on_state(self, callback: StateCallback) -> StateCallback:
         """Register a lifecycle-transition listener (proxy uses this to broadcast)."""
@@ -77,6 +84,20 @@ class BrowserSupervisor:
     def client_disconnected(self) -> None:
         """Register a client disconnecting; the idle clock restarts when it hits 0."""
         self._connections = max(0, self._connections - 1)
+
+    def expect_exit(self) -> None:
+        """Arm the watchdog to treat the next observed exit as a graceful close.
+
+        Unlike ``Browser.close`` (which reliably quits the process, so it drives
+        an immediate deliberate :meth:`shutdown`), commands like
+        ``Target.closeTarget``/``Target.disposeBrowserContext`` only *might*
+        end up closing the last target or context -- the browser may well keep
+        running for other clients, so we can't force it down here. This just
+        makes sure that *if* it turns out to have been the last one and the
+        process exits on its own, :meth:`_watch` doesn't mistake that for a
+        crash and restart it.
+        """
+        self._expect_exit = True
 
     def _set_state(self, state: BrowserState, reason: Optional[str] = None) -> None:
         logger.info("browser %s -> %s%s", self.browser_uuid, state.value,
@@ -104,10 +125,16 @@ class BrowserSupervisor:
                 if self._shutting_down:
                     return
                 if self.launcher.is_alive():
+                    self._expect_exit = False
                     if self._idle_expired():
                         await self._close_idle()
                         return
                     continue
+                if self._expect_exit:
+                    self._shutting_down = True
+                    await self.launcher.terminate()
+                    self._set_state(BrowserState.CLOSED, "closed by client")
+                    return
                 self._set_state(BrowserState.CRASHED, "process exited")
                 if not self.restart_on_crash or self._restarts >= self.max_restarts:
                     return

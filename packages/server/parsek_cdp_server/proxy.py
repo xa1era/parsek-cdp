@@ -51,6 +51,14 @@ logger = get_logger(__name__)
 #: range so they never collide with the client's ids on the same socket.
 _SERVER_ID_BASE = 1 << 30
 
+#: Control-channel methods :meth:`ParsekServer._on_control_frame` watches for --
+#: any of them might end up with the browser process quitting on its own.
+_CLOSE_LIKE_METHODS = (
+    "Browser.close",
+    "Target.closeTarget",
+    "Target.disposeBrowserContext",
+)
+
 
 async def _close_pending(pending) -> None:
     for task in pending:
@@ -396,18 +404,26 @@ class ParsekServer:
         return ws
 
     def _on_control_frame(self, browser_uuid: str):
-        """Watch a control channel for the client's ``Browser.close`` request.
+        """Watch a control channel for commands that end (or might end) the browser.
 
-        The frame is still forwarded to the browser (it closes itself gracefully);
-        this handler additionally shuts the *supervisor* down so the resulting
-        process exit is recorded as an intentional ``CLOSED`` rather than a crash
-        to be relaunched.
+        The frame is always forwarded as plain passthrough; this handler only
+        additionally reacts so a resulting process exit isn't misread as a crash
+        and relaunched:
+
+        * ``Browser.close`` reliably quits the browser, so it drives an immediate,
+          deliberate :meth:`_graceful_close` of the *supervisor* too.
+        * ``Target.closeTarget``/``Target.disposeBrowserContext`` only *might* --
+          depending on the browser/flags, closing the last target or context can
+          make it quit on its own. The browser may still be alive and serving
+          other targets, so we can't force it down here; we just arm the
+          supervisor (:meth:`BrowserSupervisor.expect_exit`) to record it as a
+          graceful close, not a crash, if the process does turn out to exit.
         """
 
         async def handle(data: str) -> None:
-            # Cheap substring gate first -- only bother parsing the frame that
-            # could actually be the close request, not every control message.
-            if "Browser.close" not in data:
+            # Cheap substring gate first -- only bother parsing frames that could
+            # actually be one of the methods we care about.
+            if not any(marker in data for marker in _CLOSE_LIKE_METHODS):
                 return
             try:
                 method = json.loads(data).get("method")
@@ -415,6 +431,10 @@ class ParsekServer:
                 return
             if method == "Browser.close":
                 await self._graceful_close(browser_uuid)
+            elif method in ("Target.closeTarget", "Target.disposeBrowserContext"):
+                supervisor = self.supervisors.get(browser_uuid)
+                if supervisor is not None:
+                    supervisor.expect_exit()
 
         return handle
 

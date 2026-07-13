@@ -14,6 +14,7 @@ import contextlib
 import json
 import os
 import random
+import shlex
 import shutil
 import tempfile
 import urllib.error
@@ -146,8 +147,9 @@ class ChromeLauncher:
 
     * build the argv (``--remote-debugging-port``, ``--user-data-dir``,
       ``--headless=new``, ``--no-first-run``, ...);
-    * start the subprocess; with ``port == 0`` Chrome writes the port it chose to
-      the ``DevToolsActivePort`` file in the profile dir, which we poll;
+    * start the subprocess via a shell wrapper that redirects its stdout/stderr
+      straight to files in the profile dir (see :meth:`launch`) -- the browser
+      process opens those descriptors itself; this process never does;
     * poll ``/json/version`` until ``webSocketDebuggerUrl`` is available;
     * expose :attr:`pid` and :attr:`ws_url`; provide :meth:`terminate`.
     """
@@ -159,6 +161,9 @@ class ChromeLauncher:
         self._proc: Optional[asyncio.subprocess.Process] = None
         #: Temp profile dir we created (and must clean up); None if caller supplied one.
         self._owned_user_data_dir: Optional[str] = None
+        #: Where the browser's own stdout/stderr were redirected (set in :meth:`launch`).
+        self.stdout_path: Optional[Path] = None
+        self.stderr_path: Optional[Path] = None
 
     def _resolve_user_data_dir(self) -> str:
         if self.options.user_data_dir is not None:
@@ -188,19 +193,46 @@ class ChromeLauncher:
         """Start the browser and return its browser-level websocket url."""
         user_data_dir = self._resolve_user_data_dir()
         argv = self._build_argv(user_data_dir)
-        self._proc = await asyncio.create_subprocess_exec(
-            *argv,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+        self.stdout_path = Path(user_data_dir) / "chrome-stdout.log"
+        self.stderr_path = Path(user_data_dir) / "chrome-stderr.log"
+        # Run through a shell that does the redirection itself (`exec ... >out 2>err`)
+        # instead of us opening the log files and dup2-ing them in: with an
+        # asyncio.subprocess.PIPE (or a file we open here), *this* process ends up
+        # holding the descriptor for as long as the browser runs, which doesn't scale
+        # once many browsers are supervised at once. `exec` replaces the shell with
+        # the browser in place (same pid), so the browser inherits the redirected
+        # fds the shell opened for itself -- this process is never in that fd's path.
+        shell_cmd = "exec {argv} >{stdout} 2>{stderr}".format(
+            argv=" ".join(shlex.quote(a) for a in argv),
+            stdout=shlex.quote(str(self.stdout_path)),
+            stderr=shlex.quote(str(self.stderr_path)),
         )
+        self._proc = await asyncio.create_subprocess_shell(shell_cmd)
         self.pid = self._proc.pid
         try:
             port = await self._await_devtools_port(Path(user_data_dir))
             self.ws_url = await self._await_ws_url(port)
-        except Exception:
+        except Exception as exc:
+            stderr_tail = self._read_log_tail(self.stderr_path)
             await self.terminate()
+            if stderr_tail:
+                raise RuntimeError(f"{exc}\nbrowser stderr:\n{stderr_tail}") from exc
             raise
         return self.ws_url
+
+    @staticmethod
+    def _read_log_tail(path: Path, *, max_bytes: int = 4000) -> str:
+        """Best-effort tail of a log file, for surfacing in the startup error.
+
+        ``terminate()`` deletes the profile dir (and these log files with it)
+        right after this runs, so a failed launch's stderr must be captured
+        here or it's lost.
+        """
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return ""
+        return data[-max_bytes:].decode(errors="replace").strip()
 
     async def _await_devtools_port(
         self, user_data_dir: Path, *, timeout: float = 30.0
