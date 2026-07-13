@@ -73,6 +73,25 @@ ws        /cdp/{browser_uuid}/control                 browser-level pipe + Parse
 ws        /cdp/{browser_uuid}/page/{target_id}        CDP-прокси (per-page) + Parsek.*
 ```
 
+### Ответы
+
+`POST /browsers` возвращает `200 application/json` — идентификатор браузера и
+его control-канал:
+
+```json
+{
+  "browserUuid": "1f2ab34cd56e78f9...",
+  "wsUrl": "ws://127.0.0.1:9333/cdp/1f2ab34cd56e78f9.../control"
+}
+```
+
+`GET /metrics` возвращает `200 text/plain` в текстовом формате Prometheus
+(см. таблицу метрик ниже).
+
+Websocket-эндпоинты (`/control` и `/page/{target_id}`) отдают апгрейд до
+websocket; при неизвестном `browser_uuid` сокет сразу закрывается с кодом
+`4040` («unknown browser»).
+
 Control-канал — это сырой pipe к browser-эндпоинту плюс broadcast
 `Parsek.browserStateChanged`, чтобы парсер узнавал о падении/рестарте браузера, а
 не висел. Browser-level CDP (создание/удаление контекстов и т.п.) проходит сквозь

@@ -75,6 +75,25 @@ ws        /cdp/{browser_uuid}/control                 browser-level pipe + Parse
 ws        /cdp/{browser_uuid}/page/{target_id}        CDP proxy (per-page) + Parsek.*
 ```
 
+### Responses
+
+`POST /browsers` returns `200 application/json` — the browser id and its
+control-channel endpoint:
+
+```json
+{
+  "browserUuid": "1f2ab34cd56e78f9...",
+  "wsUrl": "ws://127.0.0.1:9333/cdp/1f2ab34cd56e78f9.../control"
+}
+```
+
+`GET /metrics` returns `200 text/plain` in the Prometheus text exposition
+format (see the metrics table below).
+
+The websocket endpoints (`/control` and `/page/{target_id}`) respond with a
+websocket upgrade; for an unknown `browser_uuid` the socket is closed
+immediately with code `4040` ("unknown browser").
+
 The control channel is a raw pipe to the browser endpoint plus the
 `Parsek.browserStateChanged` broadcast, so a parser learns when its browser
 crashed/restarted instead of hanging; browser-level CDP (creating/disposing
