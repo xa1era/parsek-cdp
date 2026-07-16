@@ -205,22 +205,50 @@ class PageBridge:
             pass
 
     async def _handle_parsek(self, frame: dict) -> None:
-        """Handle a page-scoped ``Parsek.*`` command locally and reply."""
+        """Handle a page-scoped ``Parsek.*`` command locally and reply.
+
+        Feature commands come first: each feature owning a ``Parsek.<Feature>.*``
+        method (e.g. the Mouse feature -- a curved move + click executed *here*,
+        next to the browser, from a single client frame) exposes a
+        :meth:`~parsek_cdp.core.feature.Feature.handle_command` that returns the
+        reply dict, or ``None`` when the command isn't its own.  The built-in
+        page commands are the fallback.
+        """
         method = frame.get("method")
         params = frame.get("params", {})
         result: dict = {}
-        if method == "Parsek.setRawPassthrough":
-            self.raw_passthrough = bool(params.get("enabled"))
-        elif method == "Parsek.getRequests":
+        error: Optional[dict] = None
+        try:
+            handled = False
             for feature in self._features:
-                snap = await feature.snapshot()
-                if snap:
-                    result = snap
+                handler = getattr(feature, "handle_command", None)
+                if handler is None:
+                    continue
+                outcome = await handler(method, params)
+                if outcome is not None:  # this feature owned the command
+                    result = outcome
+                    handled = True
                     break
-        else:
-            logger.warning("unhandled Parsek command %r", method)
+            if not handled:
+                if method == "Parsek.setRawPassthrough":
+                    self.raw_passthrough = bool(params.get("enabled"))
+                elif method == "Parsek.getRequests":
+                    for feature in self._features:
+                        snap = await feature.snapshot()
+                        if snap:
+                            result = snap
+                            break
+                else:
+                    logger.warning("unhandled Parsek command %r", method)
+        except ProtocolError as exc:
+            error = {"code": exc.code, "message": exc.message, "data": exc.data}
+        except Exception as exc:  # a feature command blew up -- report, don't drop
+            logger.exception("Parsek command %r failed", method)
+            error = {"code": -32000, "message": str(exc)}
         if frame.get("id") is not None:
-            await self._send_client(json.dumps({"id": frame["id"], "result": result}))
+            reply = {"id": frame["id"]}
+            reply["error" if error is not None else "result"] = error or result
+            await self._send_client(json.dumps(reply))
 
     async def _send_client(self, data: str) -> None:
         try:
